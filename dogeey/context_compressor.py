@@ -130,13 +130,13 @@ class ContextCompressor:
         else:
             threshold_tokens = int(context_window * self.threshold)
         
-        logger.info(f"🧮 Token统计: 当前={current_tokens}, 阈值={threshold_tokens}, 窗口={context_window}")
+        logger.debug(f"🧮 Token统计: 当前={current_tokens}, 阈值={threshold_tokens}, 窗口={context_window}")
         
         if current_tokens <= threshold_tokens:
-            logger.info("✅ Token数未超阈值，无需压缩")
+            logger.debug("✅ Token数未超阈值，无需压缩")
             return messages
         
-        logger.info(f"⚠️ Token数超阈值，开始压缩...")
+        logger.debug(f"⚠️ Token数超阈值，开始压缩...")
         
         # 分离system消息和非system消息
         system_msgs = [m for m in messages if m.get('role') == 'system']
