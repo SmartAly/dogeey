@@ -582,6 +582,21 @@ def register_builtin_tools(registry: ToolRegistry):
     except ImportError as e:
         print(f"⚠️ 自进化工具导入失败: {e}")
     
+    # ============ 天气查询工具 ============
+    try:
+        from dogeey.weather_tool import tool_query_weather, WEATHER_TOOL
+        
+        registry.register(Tool(
+            name=WEATHER_TOOL["name"],
+            description=WEATHER_TOOL["description"],
+            parameters=WEATHER_TOOL["parameters"],
+            func=tool_query_weather
+        ))
+        
+        print("✅ 天气查询工具已注册")
+    except ImportError as e:
+        print(f"⚠️ 天气工具导入失败: {e}")
+    
     # ============ 工具清单工具 ============
     def tool_list_all() -> str:
         """列出所有已注册的工具（分类显示）"""
@@ -591,6 +606,7 @@ def register_builtin_tools(registry: ToolRegistry):
         categories = {
             "信息处理": [],
             "系统操作": [],
+            "天气查询": [],
             "定时任务": [],
             "工具查询": [],
             "用户画像": [],
@@ -605,6 +621,8 @@ def register_builtin_tools(registry: ToolRegistry):
                 categories["信息处理"].append(tool.name)
             elif tool.name == 'run_command':
                 categories["系统操作"].append(tool.name)
+            elif tool.name == 'query_weather':
+                categories["天气查询"].append(tool.name)
             elif tool.name.startswith('cron_'):
                 categories["定时任务"].append(tool.name)
             elif tool.name == 'tool_list_all':

@@ -116,7 +116,7 @@ class AgentCore:
                  memory_system: Optional[MemorySystem] = None,
                  user_profile: Optional[UserProfile] = None,
                  skill_manager: Optional[SkillManager] = None,
-                 max_iterations: int = 10,
+                 max_iterations: int = 45,  # 参考Hermes子Agent默认值，仅作为最后兜底
                  session_manager: Optional[Any] = None,
                  loaded_skills: Optional[List[Dict]] = None,
                  data_dir: str = None):
