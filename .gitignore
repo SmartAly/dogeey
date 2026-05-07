@@ -37,12 +37,11 @@ dogeey_messages.json
 /tmp/
 /feishu_callback.log
 
-# Test files
+# Test files (temporary only)
 _test_*.py
 _e2e*.py
 _astroncheck*.py
 _diag_*.py
-tests/test_*.py
 
 # Backup files
 *.backup
