@@ -84,17 +84,29 @@ class ContextCompressor:
             'llama-2': 4096,
             'mixtral': 32768,
             'gemini-pro': 32768,
-            'astron-code-latest': 8192,  # 假设
-            'moonshotai/kimi-k2.5': 256000,  # 更新为256000
+            'astron-code-latest': 256000,  # 修正：原来是8192
+            'kimi-k2.5': 256000,  # Kimi 2.5
+            'moonshotai/kimi-k2.5': 256000,  # 完整路径
+            'kimi': 256000,  # 简化名
         }
         
-        # 先查已知模型
+        # 先查已知模型（精确匹配）
+        if model in known_windows:
+            return known_windows[model]
+        
+        # 模糊匹配：检查model是否包含key
         for key, window in known_windows.items():
-            if key in model:
+            if key in model or model in key:
                 return window
         
-        # 默认值：8K
-        return 8192
+        # 尝试从模型名提取数字（如 "256k" -> 256000）
+        import re
+        match = re.search(r'(\d+)k', model, re.IGNORECASE)
+        if match:
+            return int(match.group(1)) * 1000
+        
+        # 默认值：256K（现代模型普遍较大）
+        return 256000
     
     def compress(self, messages: List[Dict], model: str) -> List[Dict]:
         """

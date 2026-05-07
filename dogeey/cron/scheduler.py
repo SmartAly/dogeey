@@ -25,16 +25,30 @@ from dogeey.cron.lock import FileLock
 from dogeey.cron.job import JobExecutor
 
 
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(Path.home() / ".dogeey" / "cron.log"),
-        logging.StreamHandler()
-    ]
-)
+# 配置日志（延迟初始化，避免模块导入时打开文件）
 logger = logging.getLogger("dogeey.cron")
+_logger_initialized = False
+
+def _init_logger():
+    """延迟初始化日志处理器"""
+    global _logger_initialized
+    if _logger_initialized:
+        return
+    _logger_initialized = True
+    
+    handlers = [logging.StreamHandler()]
+    try:
+        log_path = Path.home() / ".dogeey" / "cron.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        handlers.append(logging.FileHandler(log_path))
+    except (PermissionError, OSError):
+        pass  # 如果无法写入日志文件，仅使用控制台输出
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=handlers
+    )
 
 
 class APSchedulerCronScheduler:
@@ -49,6 +63,7 @@ class APSchedulerCronScheduler:
     """
     
     def __init__(self, check_interval=None, **kwargs):
+        _init_logger()
         self.scheduler = BackgroundScheduler()
         self.storage = CronStorage()
         self.lock = FileLock()
@@ -115,6 +130,14 @@ class APSchedulerCronScheduler:
             run_date = config.get("run_date")
             if not run_date:
                 run_date = datetime.now()
+            else:
+                # 验证日期字符串
+                try:
+                    # 尝试解析ISO格式日期
+                    datetime.fromisoformat(run_date)
+                except (ValueError, TypeError):
+                    logger.warning(f"⚠️ 无效日期字符串: {run_date}，使用当前时间")
+                    run_date = datetime.now()
             return DateTrigger(run_date=run_date)
         
         elif schedule_type == "interval":
@@ -165,8 +188,12 @@ class APSchedulerCronScheduler:
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
     
-    def start(self):
-        """启动调度器（阻塞，直到收到停止信号）"""
+    def start(self, blocking=False):
+        """启动调度器
+        
+        Args:
+            blocking: 是否阻塞当前线程（True=独立运行模式, False=后台运行模式）
+        """
         self._setup_signal_handlers()
         
         logger.info("=" * 60)
@@ -179,20 +206,28 @@ class APSchedulerCronScheduler:
         
         for job_data in jobs:
             try:
-                # 直接加载已有任务，不重新插入数据库
                 self._load_existing_job(job_data)
             except Exception as e:
-                logger.error(f"❌ Failed to load job {job_data['id']}: {e}")
+                job_id = job_data.get('id', 'unknown')
+                logger.error(f"Failed to load job {job_id}: {e}")
+                try:
+                    self.storage.delete_job(job_id)
+                    logger.info(f"Deleted invalid job: {job_id}")
+                except:
+                    pass
         
-        logger.info(f"✅ Loaded {len(self.scheduler.get_jobs())} jobs")
-        logger.info("🚀 Scheduler is running...")
+        logger.info(f"Loaded {len(self.scheduler.get_jobs())} jobs")
         
-        try:
-            self.scheduler.start()
-        except (KeyboardInterrupt, SystemExit):
-            logger.info("Received shutdown signal")
-        finally:
-            self.shutdown()
+        self.scheduler.start()
+        logger.info("Scheduler is running...")
+        
+        if blocking:
+            try:
+                self.scheduler.block()
+            except (KeyboardInterrupt, SystemExit):
+                logger.info("Received shutdown signal")
+            finally:
+                self.shutdown()
     
     def _load_existing_job(self, job_data: Dict):
         """加载已有任务到APScheduler（不插入数据库）"""
@@ -241,6 +276,22 @@ class APSchedulerCronScheduler:
     def list_jobs(self, status: str = None) -> List[Dict]:
         """列出任务"""
         return self.storage.get_all_jobs(status=status)
+    
+    def status(self) -> Dict:
+        """获取调度器状态"""
+        from datetime import datetime
+        all_jobs = self.storage.get_all_jobs()
+        active_jobs = self.storage.get_all_jobs(status="active")
+        now = datetime.now().isoformat()
+        
+        return {
+            "running": self.scheduler.running,
+            "check_interval": getattr(self, '_check_interval', 60),
+            "total_jobs": len(all_jobs),
+            "enabled_jobs": len(active_jobs),
+            "due_jobs": 0,
+            "apscheduler_jobs": len(self.scheduler.get_jobs()),
+        }
     
     def delete_job(self, job_id: str):
         """删除任务"""

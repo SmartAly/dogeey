@@ -428,9 +428,42 @@ class DogeeySession:
         
         click.echo()
         click.echo("组件状态:")
+        
+        # 核心组件
         click.echo(f"  🧠 记忆系统: {'✅ 已加载' if self.agent and self.agent.memory else '❌ 未启用'}")
         click.echo(f"  👤 用户画像: {'✅ 已加载' if self.agent and self.agent.profile else '❌ 未启用'}")
         click.echo(f"  📚 技能库: {'✅ 已加载' if self.agent and self.agent.skills else '❌ 未启用'}")
+        
+        # 会话管理
+        click.echo(f"  💬 会话管理: {'✅ 已加载' if self.session_manager else '❌ 未启用'}")
+        if self.session_manager:
+            sessions = self.session_manager.list_sessions()
+            click.echo(f"     └─ 会话数: {len(sessions)}")
+        
+        # 定时任务系统
+        click.echo(f"  ⏰ 定时任务: {'✅ 已加载' if self.cron_manager else '❌ 未启用'}")
+        if self.cron_manager:
+            try:
+                jobs = self.cron_manager.list_jobs()
+                click.echo(f"     └─ 任务数: {len(jobs)}")
+            except:
+                pass
+        
+        # 调度器
+        click.echo(f"  🚀 调度器: {'✅ 运行中' if self.scheduler and self.scheduler.scheduler.running else '❌ 未启动'}")
+        
+        # 频道系统
+        click.echo(f"  📡 频道系统: {'✅ 已加载' if self.channel_manager else '❌ 未启用'}")
+        if self.channel_manager:
+            ch_count = len(self.channel_manager.channels) if hasattr(self.channel_manager, 'channels') else 0
+            click.echo(f"     └─ 频道数: {ch_count}")
+        
+        # 元认知系统
+        if self.agent and hasattr(self.agent, 'metacognition'):
+            click.echo(f"  🎯 元认知系统: ✅ 已加载")
+        
+        # 上下文压缩
+        click.echo(f"  🗜️  上下文压缩: {'✅ 已启用' if self.agent and hasattr(self.agent, 'context_compressor') else '❌ 未启用'}")
         
         click.echo()
         click.echo("━" * 50)
@@ -540,8 +573,11 @@ class DogeeySession:
         import atexit
         atexit.register(save_history)
         
-        # 输入提示符（用cyan蓝色，不干扰readline）
-        input_prompt = "\001\033[36m\002>>> \001\033[0m\002"
+        # 输入提示符（用cyan蓝色）
+        # 注意：为了兼容readline并防止删除提示符，使用click.prompt
+        # readline的颜色转义符\001\002在某些情况下可能失效
+        # 改用无颜色的>>>，或者接受限制
+        use_colored_prompt = True  # 设置为False可禁用颜色，彻底避免删除问题
         
         # 注册退出时的清理函数（停止调度器）
         def cleanup_cron():
@@ -588,36 +624,67 @@ class DogeeySession:
                     current_tokens = 0
                     max_tokens = 256000  # 默认值
                     
-                    # 尝试从agent获取历史并估算token
-                    if self.agent:
+                    # 尝试从session_manager获取历史并估算token
+                    if self.agent and self.session_manager:
                         try:
                             from dogeey.context_compressor import ContextCompressor
-                            compressor = ContextCompressor()
+                            compressor = ContextCompressor(llm_client=self.llm_client)
                             
-                            # 获取历史消息
+                            # 获取当前会话的历史消息
+                            current_session = self.session_manager.get_current_session()
                             messages = []
-                            if hasattr(self.agent, 'short_term_memory'):
-                                for mem in self.agent.short_term_memory:
+                            
+                            if current_session and hasattr(current_session, 'short_term_memory'):
+                                for mem in current_session.short_term_memory:
                                     if isinstance(mem, dict):
+                                        # 格式: {"user": ..., "assistant": ...}
                                         if 'user' in mem:
                                             messages.append({'role': 'user', 'content': mem['user']})
-                                        if 'assistant' in mem:
+                                        if 'assistant' in mem:  # 修正拼写
                                             messages.append({'role': 'assistant', 'content': mem['assistant']})
+                            
+                            # 如果有上下文管理器，也加入其消息
+                            if hasattr(self.agent, 'context_manager') and self.agent.context_manager:
+                                try:
+                                    ctx = self.agent.context_manager.get_active_context()
+                                    if ctx and hasattr(ctx, 'messages'):
+                                        for msg in ctx.messages:
+                                            if isinstance(msg, dict):
+                                                role = msg.get('role', 'unknown')
+                                                content = msg.get('content', '')
+                                                messages.append({'role': role, 'content': content})
+                                except:
+                                    pass
                             
                             if messages:
                                 current_tokens = compressor.estimate_tokens(messages)
                             max_tokens = compressor.get_context_window(model)
+                            
+                            if self.verbose:
+                                show_info(f"Token统计: 当前={current_tokens}, 窗口={max_tokens}, 消息数={len(messages)}")
                         except Exception as e:
                             if self.verbose:
                                 show_warning(f"估算token失败: {e}")
+                                import traceback
+                                traceback.print_exc()
                     
                     # 显示状态栏
                     from .fancy_output import show_model_status
                     show_model_status(model, provider, current_tokens, max_tokens)
                 
-                # 显示输入提示符（带颜色）
-                print(input_prompt, end="", flush=True)
-                user_input = input()
+                # 显示输入提示符
+                if use_colored_prompt:
+                    # 使用click.prompt（提示符不可删除，但会失去readline历史）
+                    # 为了保留历史记录功能，我们使用input()但需要特殊处理
+                    try:
+                        # 尝试使用带颜色的提示符（作为input的参数）
+                        # 注意：某些终端可能不显示颜色
+                        user_input = input("\033[36m>>> \033[0m")
+                    except (EOFError, KeyboardInterrupt):
+                        raise
+                else:
+                    # 无颜色版本，更兼容
+                    user_input = input(">>> ")
                 
                 # 处理命令
                 if not user_input.strip():

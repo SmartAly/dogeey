@@ -738,6 +738,7 @@ class TaskSupervisor:
             self.retry_policy.reset()
             self._tool_calls = []
             self._tool_call_made = False
+            self._invalid_tool_count = 0  # 初始化无效工具计数器
 
             mode = self._detect_mode(agent_core)
             if self.verbose:
@@ -833,10 +834,10 @@ class TaskSupervisor:
                     for tool_call in response_msg.tool_calls:
                         tool_name = tool_call.function.name
                         tool_args_str = tool_call.function.arguments
-
+                        
                         if self.verbose:
                             self._logger.info(f"   🔧 调用: {tool_name}, args: {tool_args_str[:100]}")
-
+                        
                         if isinstance(tool_args_str, str):
                             try:
                                 tool_args = json.loads(tool_args_str)
@@ -844,7 +845,49 @@ class TaskSupervisor:
                                 tool_args = {"raw": tool_args_str}
                         else:
                             tool_args = tool_args_str
-
+                        
+                        # 检查工具是否存在
+                        if not agent_core.tools.exists(tool_name):
+                            self._invalid_tool_count += 1
+                            if self._invalid_tool_count >= 3:
+                                duration = time.time() - start_time
+                                self._logger.error(f"❌ 连续{self._invalid_tool_count}次调用不存在的工具 '{tool_name}'，跳出循环")
+                                return TaskResult(
+                                    status=TaskStatus.FAILED,
+                                    error_type=ErrorType.INVALID_ACTION,
+                                    error_msg=f"连续{self._invalid_tool_count}次调用不存在的工具: {tool_name}。可用工具: {agent_core.tools.get_tools_index()}",
+                                    steps=step,
+                                    duration=duration
+                                )
+                            
+                            if self.verbose:
+                                self._logger.warning(f"⚠️ 工具不存在 (第{self._invalid_tool_count}次): {tool_name}")
+                            
+                            # 返回错误信息作为observation
+                            error_msg = f"❌ 技能不存在: {tool_name}。可用: {agent_core.tools.get_tools_index()}"
+                            messages.append({
+                                "role": "assistant",
+                                "content": response_msg.content or "",
+                                "tool_calls": [{
+                                    "id": tool_call.id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": tool_name,
+                                        "arguments": tool_args_str if isinstance(tool_args_str, str) else json.dumps(tool_args_str)
+                                    }
+                                }]
+                            })
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": error_msg
+                            })
+                            self._record_tool_call(tool_name, tool_args, error_msg)
+                            continue
+                        
+                        # 工具存在，重置无效计数
+                        self._invalid_tool_count = 0
+                        
                         tool_result = agent_core.tools.execute(tool_name, tool_args)
 
                         if self.verbose:
@@ -978,15 +1021,33 @@ class TaskSupervisor:
                     self._tool_call_made = True
                     tool_name = parsed["action"]
                     tool_input = parsed["action_input"]
-
+                    
                     if self.verbose:
                         self._logger.info(f"   🔧 Action: {tool_name}, Input: {str(tool_input)[:100]}")
-
+                    
                     if not agent_core.tools.exists(tool_name):
-                        observation = f"找不到工具 '{tool_name}'。可用: {agent_core.tools.get_tools_index()}"
+                        # 工具不存在：记录计数，连续3次就跳出
+                        self._invalid_tool_count = getattr(self, '_invalid_tool_count', 0) + 1
+                        if self._invalid_tool_count >= 3:
+                            duration = time.time() - start_time
+                            self._logger.error(f"❌ 连续{self._invalid_tool_count}次调用不存在的工具 '{tool_name}'，跳出循环")
+                            return TaskResult(
+                                status=TaskStatus.FAILED,
+                                error_type=ErrorType.INVALID_ACTION,
+                                error_msg=f"连续{self._invalid_tool_count}次调用不存在的工具: {tool_name}。可用工具: {agent_core.tools.get_tools_index()}",
+                                steps=step,
+                                duration=duration
+                            )
+                        
+                        observation = f"❌ 技能不存在: {tool_name}。可用: {agent_core.tools.get_tools_index()}"
+                        if self.verbose:
+                            self._logger.warning(f"⚠️ 工具不存在 (第{self._invalid_tool_count}次): {tool_name}")
                         messages.append({"role": "assistant", "content": response_text})
                         messages.append({"role": "user", "content": f"Observation: {observation}"})
                         continue
+                    
+                    # 工具存在，重置无效计数
+                    self._invalid_tool_count = 0
 
                     tool_result = agent_core.tools.execute(tool_name, tool_input)
 
