@@ -77,20 +77,29 @@ Final Answer: 北京今天天气晴朗，气温15°C，适合外出活动。
 """
 
 
-FUNCTION_CALLING_PROMPT = """你是一个智能助手，名叫"铁蛋"（Dogeey）。你的职责是诚实、不推诿、不糊弄、解决问题。
+FUNCTION_CALLING_PROMPT = """你是"铁蛋"（Dogeey），一个务实、诚实、靠谱的智能助手。
 
 {user_profile}
 
-## 你的能力：
-你有大量可用工具来帮助用户完成任务。**每次收到用户消息，你必须选择并调用至少一个工具**，即使是简单的问候也要用工具（如 tool_list_all 或 read_file）来做点什么。
+## 基本原则
+1. **绝不编造**：不知道就说不知道，能查就查，查不到就承认
+2. **绝不糊弄**：不给出没有依据的回答，不凭空想象数据
+3. **绝不推诿**：能做的事全力做好，不找借口
+4. **实事求是**：会就会，不会就说不，但会尝试去探索和学习
 
-## 核心规则：
-1. 绝对不要直接回答用户问题，必须通过工具调用
-2. 即使你觉得"这不需要工具"，也必须随便选一个工具用
-3. 工具调用后，根据工具结果再给出最终答案
-4. 如果你不知道答案，用工具去查；不要猜测
+## 工具使用策略
+- 有合适工具时，必须调用工具
+- 没有合适工具时，坦诚告知用户当前能力的局限性
+- 不要为了调用工具而调用工具——不要乱用不相关的工具
+- 工具返回的结果才是你回答的依据，不要脱离工具结果凭空发挥
 
-## 回答风格:
+## 诚实准则
+- 如果工具查询不到信息，明确告诉用户"我目前没有查询到相关信息"
+- 如果需要实时数据但你没有实时查询工具，说明"我目前没有实时数据查询能力"
+- 如果用户的问题超出你的能力范围，坦诚承认并建议用户通过其他途径获取信息
+- 永远不要编造天气、新闻、股票价格等实时数据
+
+## 回答风格
 - 简洁实用，直奔主题
 - 不啰嗦、不卖弄
 - 像有经验的老工程师一样说话
@@ -107,7 +116,7 @@ class AgentCore:
                  memory_system: Optional[MemorySystem] = None,
                  user_profile: Optional[UserProfile] = None,
                  skill_manager: Optional[SkillManager] = None,
-                 max_iterations: int = 100,
+                 max_iterations: int = 10,
                  session_manager: Optional[Any] = None,
                  loaded_skills: Optional[List[Dict]] = None,
                  data_dir: str = None):
@@ -915,6 +924,7 @@ class TaskSupervisor:
                         })
                         self._record_tool_call(tool_name, tool_args, str(tool_result))
                 else:
+                    # 模型没有调用工具
                     if self._tool_call_made:
                         # 已经调用过工具，接受当前消息作为最终答案
                         final_answer = response_msg.content or ""
@@ -925,22 +935,32 @@ class TaskSupervisor:
                     if self.verbose:
                         self._logger.warning(f"⚠️ 模型未调用工具 (第{fc_no_tool_count}次)，内容: {(response_msg.content or '')[:150]}")
 
-                    if fc_no_tool_count >= 2:
+                    # 连续3次不调用工具，直接返回诚实回复
+                    if fc_no_tool_count >= 3:
+                        duration = time.time() - start_time
+                        final_answer = response_msg.content or "抱歉，我目前没有合适的工具来完成这个任务，无法为您提供准确的信息。"
                         if self.verbose:
-                            self._logger.info(f"🔄 连续{fc_no_tool_count}次不调用工具，切换文本ReAct")
-                        return self._execute_text_react(agent_core, user_input, start_time)
+                            self._logger.info(f"🔄 连续{fc_no_tool_count}次未调用工具，返回诚实回复")
+                        return TaskResult(status=TaskStatus.PARTIAL_SUCCESS, answer=final_answer,
+                                          steps=step, tool_calls=self._tool_calls, duration=duration)
 
                     messages.append({"role": "assistant", "content": response_msg.content or ""})
-                    messages.append({"role": "user", "content": f"上一轮没有调用任何工具。必须使用工具来完成 '{user_input}'。请选择一个合适的工具。"})
+                    messages.append({"role": "user", "content": f"上一轮没有调用任何工具。如果你有合适的工具请使用它来完成 '{user_input}'，如果没有相关工具请直接说明。"})
 
             except Exception as e:
+                error_str = str(e)
                 if self.verbose:
-                    self._logger.warning(f"⚠️ FC异常，切换文本ReAct: {e}")
+                    self._logger.warning(f"⚠️ FC异常: {e}")
+                # HTTP 500等严重错误，快速失败
+                if "500" in error_str or "HTTP" in error_str:
+                    duration = time.time() - start_time
+                    return TaskResult(status=TaskStatus.FAILED, error_type=ErrorType.LLM_ERROR,
+                                      error_msg=f"模型调用失败: {error_str}", steps=step, duration=duration)
                 return self._execute_text_react(agent_core, user_input, start_time)
 
         duration = time.time() - start_time
         return TaskResult(status=TaskStatus.TIMEOUT, error_type=ErrorType.TIMEOUT,
-                          error_msg=f"达到最大迭代 ({self.max_iterations})", steps=self.max_iterations, duration=duration)
+                          error_msg=f"达到最大迭代次数 ({self.max_iterations})，无法完成此任务", steps=self.max_iterations, duration=duration)
 
     def _execute_text_react(self, agent_core: AgentCore, user_input: str, start_time: float) -> TaskResult:
         self._logger.debug(f"进入_execute_text_react(), user_input={user_input[:50]}")
