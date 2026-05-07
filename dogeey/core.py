@@ -171,26 +171,29 @@ class AgentCore:
             context.add_message("user", user_input)
         
         # 创建任务监督器
-        print(f"🔍 DEBUG: run() - 准备创建TaskSupervisor, verbose={verbose}")
+        self._logger.debug(f"run() - 准备创建TaskSupervisor, verbose={verbose}")
         supervisor = TaskSupervisor(
             max_iterations=self.max_iterations,
             verbose=verbose
         )
-        print(f"🔍 DEBUG: run() - TaskSupervisor已创建")
+        self._logger.debug(f"run() - TaskSupervisor已创建")
         
-        # 执行任务
-        print(f"🔍 DEBUG: run() - 准备调用supervisor.execute()")
+        self._logger.debug(f"run() - 准备调用supervisor.execute()")
         result = supervisor.execute(
             agent_core=self,
             user_input=user_input
         )
-        print(f"🔍 DEBUG: run() - supervisor.execute()已返回, result={result.status if result else None}")
+        self._logger.debug(f"run() - supervisor.execute()已返回, result={result.status if result else None}")
         
         # 元认知：记录任务执行结果
         _ctx_id = getattr(self, '_current_context_id', None)
         if result.is_success():
             if context:
                 context.add_message("assistant", result.answer)
+            
+            # 保存对话历史到session_manager（确保后续对话能获取上下文）
+            if self.session_manager:
+                self.session_manager.add_to_current_session(user_input, result.answer)
             
             self.metacognition.record_task_execution(
                 user_input=user_input,
@@ -732,7 +735,7 @@ class TaskSupervisor:
         self._logger = __import__("logging").getLogger(__name__)
 
     def execute(self, agent_core: AgentCore, user_input: str) -> TaskResult:
-        print(f"🔍 DEBUG: 进入execute(), user_input={user_input[:50]}")
+        self._logger.debug(f"进入execute(), user_input={user_input[:50]}")
         start_time = time.time()
         try:
             self.retry_policy.reset()
@@ -940,7 +943,7 @@ class TaskSupervisor:
                           error_msg=f"达到最大迭代 ({self.max_iterations})", steps=self.max_iterations, duration=duration)
 
     def _execute_text_react(self, agent_core: AgentCore, user_input: str, start_time: float) -> TaskResult:
-        print(f"🔍 DEBUG: 进入_execute_text_react(), user_input={user_input[:50]}")
+        self._logger.debug(f"进入_execute_text_react(), user_input={user_input[:50]}")
         
         messages = agent_core._build_messages(user_input)
 
