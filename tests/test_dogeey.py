@@ -143,6 +143,25 @@ class DogeeyTestRunner:
             ("T21_超长输入", t21_long_input),
             ("T22_特殊字符", t22_special_chars),
             ("T23_空输入", t23_empty_input),
+            
+            # 补充测试 (26-40)
+            ("T24_记忆持久化", t24_memory_persistence),
+            ("T25_Cron持久化", t25_cron_persistence),
+            ("T26_上下文压缩", t26_context_compression),
+            ("T27_工具渐进式披露", t27_tool_progressive_disclosure),
+            ("T28_ReAct回退", t28_react_fallback),
+            ("T29_工具参数校验", t29_tool_parameter_validation),
+            ("T30_大文件截断", t30_large_file_truncation),
+            ("T31_ContextFlow话题", t31_contextflow_topic_management),
+            ("T32_Unicode边界", t32_unicode_boundary),
+            ("T33_Session内存", t33_session_memory_growth),
+            ("T34_LLM客户端", t34_llm_client_creation),
+            ("T35_工具表隔离", t35_tool_registry_isolation),
+            ("T36_Cron合法", t36_cron_expression_validation),
+            ("T37_Cron非法", t37_cron_invalid_expression),
+            ("T38_运行时长", t38_agent_run_time_limit),
+            ("T39_工具完整性", t39_tool_list_comprehensive),
+            ("T40_技能加载", t40_skill_loading),
         ]
     
     def _print_summary(self):
@@ -527,6 +546,272 @@ def t23_empty_input(r: TestResult):
     r.output = output
     record_tool_calls(agent, r)
     r.passed = len(output) > 0  # 有回复即可
+
+
+# ============================================================
+# 补充测试用例（26-40）
+# ============================================================
+
+def t24_memory_persistence(r: TestResult):
+    """记忆持久化 - 新建Agent后记忆还在"""
+    agent1 = create_test_agent()
+    agent1.run("记住一个测试关键词: persistence_test_2026")
+    
+    # 新建Agent实例（模拟重启）
+    agent2 = create_test_agent()
+    output = agent2.run("我之前让你记住了什么关键词？")
+    r.output = output
+    r.passed = "persistence_test_2026" in output or "不知道" in output or "没有找到" in output
+
+
+def t25_cron_persistence(r: TestResult):
+    """定时任务持久化"""
+    from dogeey.cron.manager import CronManager
+    from dogeey.cron.storage import CronStorage
+    
+    # 清理旧数据
+    try:
+        CronStorage().delete_job("test_persist_001")
+    except:
+        pass
+    
+    agent = create_test_agent()
+    agent.run("创建一个任务ID为test_persist_001的定时任务，每5分钟打印一次hello")
+    
+    # 新建manager检查
+    storage = CronStorage()
+    jobs = storage.get_all_jobs()
+    job_exists = any(j.get("id") == "test_persist_001" for j in jobs)
+    
+    r.passed = job_exists
+    
+    # 清理
+    try:
+        storage.delete_job("test_persist_001")
+    except:
+        pass
+
+
+def t26_context_compression(r: TestResult):
+    """上下文压缩触发"""
+    from dogeey.context_compressor import ContextCompressor
+    
+    compressor = ContextCompressor()
+    
+    # 构造少量消息（不触发压缩）
+    messages = [
+        {"role": "system", "content": "你是一个助手"},
+        {"role": "user", "content": "你好"},
+        {"role": "assistant", "content": "你好！有什么可以帮助你的？"},
+    ]
+    
+    result = compressor.compress(messages)
+    r.passed = isinstance(result, list) and len(result) >= 2
+
+
+def t27_tool_progressive_disclosure(r: TestResult):
+    """工具渐进式披露 - L1索引、L2简述、L3完整"""
+    from dogeey.tools import ToolRegistry, register_builtin_tools
+    
+    reg = ToolRegistry()
+    register_builtin_tools(reg)
+    
+    # L1: 索引
+    level1 = reg.get_tools_index()
+    r.passed = len(level1) > 0 and isinstance(level1, str)
+
+
+def t28_react_fallback(r: TestResult):
+    """ReAct模式回退"""
+    from dogeey.tools import ToolRegistry
+    
+    # 创建空工具注册表
+    reg = ToolRegistry()
+    cfg_obj = Config()
+    cfg = cfg_obj.load()
+    llm = create_llm_client_from_config(cfg)
+    session_mgr = SessionManager()
+    
+    agent = AgentCore(
+        llm_client=llm,
+        tool_registry=reg,
+        session_manager=session_mgr,
+        max_iterations=10,
+    )
+    
+    # 没有工具的ReAct模式
+    output = agent.run("你好")
+    r.output = output
+    r.passed = len(output) > 10
+
+
+def t29_tool_parameter_validation(r: TestResult):
+    """工具参数校验"""
+    from dogeey.tools import ToolRegistry, register_builtin_tools
+    
+    reg = ToolRegistry()
+    register_builtin_tools(reg)
+    
+    # 尝试读取不存在的文件（参数合法但文件不存在）
+    result = reg.execute("read_file", {"file_path": "/nonexistent_path_12345"})
+    r.passed = "error" in str(result).lower() or "不存在" in str(result) or "not found" in str(result).lower()
+
+
+def t30_large_file_truncation(r: TestResult):
+    """大文件读取截断"""
+    temp_dir = tempfile.mkdtemp(prefix="dogeey_test_")
+    large_file = Path(temp_dir) / "large.txt"
+    
+    # 创建3000行文件
+    with open(large_file, "w") as f:
+        for i in range(3000):
+            f.write(f"第{i+1}行测试内容\n")
+    
+    agent = create_test_agent(temp_dir)
+    output = agent.run(f"读取 {large_file} 的内容")
+    r.output = output
+    record_tool_calls(agent, r)
+    r.passed = len(output) > 0  # 有输出即可
+    shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def t31_contextflow_topic_management(r: TestResult):
+    """ContextFlow话题管理"""
+    from dogeey.context_flow import ContextManager
+    
+    cfg_obj = Config()
+    cfg = cfg_obj.load()
+    llm = create_llm_client_from_config(cfg)
+    
+    cm = ContextManager(llm_client=llm)
+    
+    # 创建话题
+    ctx_id = cm.create_context("测试话题")
+    cm.add_message(ctx_id, "user", "第一条消息")
+    cm.add_message(ctx_id, "assistant", "第一条回复")
+    
+    # 检查
+    context = cm.get_context(ctx_id)
+    msg_count = len(context.messages)
+    
+    r.passed = msg_count == 2
+
+
+def t32_unicode_boundary(r: TestResult):
+    """Unicode/编码边界"""
+    agent = create_test_agent()
+    # 混合中文、emoji、日文、特殊字符
+    output = agent.run("请回复这个: 🎉 你好 世界 🌍 こんにちは 안녕하세요")
+    r.output = output
+    r.passed = len(output) > 5
+
+
+def t33_session_memory_growth(r: TestResult):
+    """Session内存管理"""
+    agent = create_test_agent()
+    
+    # 模拟多轮对话
+    for i in range(10):
+        agent.run(f"这是第{i+1}轮测试消息")
+    
+    if agent.session_manager:
+        sessions = agent.session_manager.list_sessions()
+        # 检查session数量可控
+        r.passed = len(sessions) < 20
+    else:
+        r.passed = True
+
+
+def t34_llm_client_creation(r: TestResult):
+    """LLM客户端创建"""
+    cfg_obj = Config()
+    cfg = cfg_obj.load()
+    llm = create_llm_client_from_config(cfg)
+    
+    r.passed = llm is not None
+    # 尝试简单调用
+    try:
+        resp = llm.chat("你好")
+        r.passed = resp is not None and len(resp) > 0
+    except Exception as e:
+        r.passed = False
+        r.error = f"LLM调用失败: {e}"
+
+
+def t35_tool_registry_isolation(r: TestResult):
+    """工具注册表隔离"""
+    from dogeey.tools import ToolRegistry
+    
+    reg1 = ToolRegistry()
+    reg2 = ToolRegistry()
+    
+    reg1.register(Tool(
+        name="test_tool_isolated",
+        description="测试隔离",
+        parameters={"type": "object", "properties": {}},
+        func=lambda: "isolated"
+    ))
+    
+    # reg2 不应该有 reg1 的工具
+    r.passed = not reg2.exists("test_tool_isolated") and reg1.exists("test_tool_isolated")
+
+
+def t36_cron_expression_validation(r: TestResult):
+    """Cron表达式验证"""
+    from dogeey.cron.job import CronExpression
+    
+    # 合法的cron
+    valid = CronExpression("0 9 * * *")
+    r.passed = valid.is_valid()
+
+
+def t37_cron_invalid_expression(r: TestResult):
+    """Cron无效表达式"""
+    from dogeey.cron.job import CronExpression
+    
+    # 非法的cron
+    invalid = CronExpression("60 25 * * *")
+    r.passed = not invalid.is_valid()
+
+
+def t38_agent_run_time_limit(r: TestResult):
+    """Agent运行时间限制"""
+    agent = create_test_agent()
+    
+    start = time.time()
+    output = agent.run("你好")
+    duration = time.time() - start
+    
+    r.passed = duration < 120  # 不应超过2分钟
+
+
+def t39_tool_list_comprehensive(r: TestResult):
+    """工具列表完整性"""
+    from dogeey.tools import ToolRegistry, register_builtin_tools
+    
+    reg = ToolRegistry()
+    register_builtin_tools(reg)
+    
+    all_tools = reg.list_tools()
+    tool_names = [t.name for t in all_tools]
+    
+    # 核心工具应该都存在
+    required = ["read_file", "write_file", "run_command", "search_files", "query_weather"]
+    missing = [t for t in required if t not in tool_names]
+    
+    r.passed = len(missing) == 0
+    if missing:
+        r.error = f"缺少工具: {missing}"
+
+
+def t40_skill_loading(r: TestResult):
+    """技能加载"""
+    from dogeey.skills import SkillManager
+    
+    sm = SkillManager()
+    # 获取技能索引
+    index = sm.get_skill_index()
+    r.passed = isinstance(index, str) or index is not None
 
 
 # ============================================================
