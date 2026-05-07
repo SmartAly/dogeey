@@ -120,6 +120,8 @@ class AgentCore:
                  session_manager: Optional[Any] = None,
                  loaded_skills: Optional[List[Dict]] = None,
                  data_dir: str = None):
+        import logging
+        self._logger = logging.getLogger("dogeey.core")
         self.llm = llm_client
         self.tools = tool_registry
         self.memory = memory_system
