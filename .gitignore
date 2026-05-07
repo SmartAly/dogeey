@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyc
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Dogeey Data (user-specific, should not be committed)
+skills/
+data/
+*.db
+*.sqlite
+*.sqlite3
+dogeey_messages.json
+
+# Logs
+*.log
+/tmp/
+/feishu_callback.log
+
+# Test files
+_test_*.py
+_e2e*.py
+_astroncheck*.py
+_diag_*.py
+tests/test_*.py
+
+# Backup files
+*.backup
+*.bak
+*.old
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config (contains API keys!)
+config.json
+~/.dogeey/
