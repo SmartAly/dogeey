@@ -9,27 +9,24 @@ import re
 from openai import OpenAI
 from typing import List, Dict, Optional, Iterator
 
-# 抑制OpenAI SDK内部的httpx重试日志（我们自己控制重试）
 logging.getLogger("openai._base_client").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 class LLMClient:
     """LLM客户端封装（带自动重试）"""
-    
+
     def __init__(self, api_key: str, base_url: str, model: str, timeout: int = 120):
-        # 清除代理环境变量，避免 SDK 走代理导致认证失败
         for env_key in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
             if env_key in os.environ:
                 del os.environ[env_key]
-        
+
         self.client = OpenAI(
             api_key=api_key,
             base_url=base_url,
             timeout=timeout,
-            max_retries=0,  # 自己控制重试，不用SDK默认的
+            max_retries=0,
             default_headers={
-                # OpenRouter 要求的 headers
                 "HTTP-Referer": "https://github.com/SmartAly/dogeey",
                 "X-Title": "dogeey",
             }
@@ -91,7 +88,7 @@ class LLMClient:
 
             except Exception as e:
                 err_str = str(e)
-                status_code = self._extract_status_code(err_str)
+                status_code = self._extract_status_code(err_str, e)
 
                 # 记录详细错误信息
                 self._logger.error(f"LLM调用异常 (attempt {attempt+1}): status_code={status_code}, error={err_str[:200]}")
@@ -117,16 +114,30 @@ class LLMClient:
                     msg = self._format_final_error(status_code, err_str)
                     raise Exception(msg)
     
-    def _extract_status_code(self, err_str: str) -> int:
-        """从错误字符串中提取HTTP状态码"""
+    def _extract_status_code(self, err_str: str, exc: Exception = None) -> int:
+        """从错误字符串或异常类型中提取HTTP状态码"""
         match = re.search(r'(\d{3})', err_str)
         if match:
             return int(match.group(1))
+        if exc is not None:
+            cls_name = exc.__class__.__name__
+            sdk_codes = {
+                'InternalServerError': 500,
+                'RateLimitError': 429,
+                'BadRequestError': 400,
+                'AuthenticationError': 401,
+                'PermissionDeniedError': 403,
+                'NotFoundError': 404,
+                'UnprocessableEntityError': 422,
+                'APITimeoutError': 408,
+            }
+            return sdk_codes.get(cls_name, 0)
         return 0
     
     def _format_final_error(self, status_code: int, err_str: str) -> str:
         """格式化最终错误消息（用户友好）"""
         friendly = {
+            500: "模型服务内部错误（500），请稍后再试",
             502: "模型服务暂时不可用（502 Bad Gateway），请稍后再试",
             503: "模型服务暂时过载（503 Service Unavailable），请稍后再试",
             504: "模型响应超时（504 Gateway Timeout），可能是请求量太大",
@@ -135,7 +146,6 @@ class LLMClient:
         msg = friendly.get(status_code)
         if msg:
             return msg
-        # 兜底：不暴露原始技术细节
         return f"模型调用失败（HTTP {status_code}），请稍后再试"
     
     def _handle_stream(self, response) -> Iterator[str]:
@@ -163,7 +173,7 @@ class LLMClient:
             except Exception as e:
                 last_error = e
                 err_str = str(e)
-                status_code = self._extract_status_code(err_str)
+                status_code = self._extract_status_code(err_str, e)
                 
                 if status_code in (401, 403, 400):
                     raise
