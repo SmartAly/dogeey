@@ -246,6 +246,29 @@ class APSchedulerCronScheduler:
         # 创建触发器
         trigger = self._create_trigger(job_data)
         
+        # 检查任务是否过期（如果已过期且不需要补执行，跳过）
+        next_run_str = job_data.get("next_run", "")
+        if next_run_str:
+            try:
+                from datetime import datetime
+                next_run = datetime.fromisoformat(next_run_str)
+                if next_run < datetime.now() and not job_data.get("catch_up_on_start", False):
+                    # 任务已过期，更新下次执行时间为未来
+                    from dogeey.cron.job import CronJob
+                    temp_job = CronJob(self.storage, self.lock, job_data)
+                    new_next = temp_job.calculate_next_run()
+                    if new_next:
+                        self.storage.update_job(job_id, {"next_run": new_next})
+                        job_data["next_run"] = new_next
+                        # 重新创建触发器
+                        trigger = self._create_trigger(job_data)
+                        logger.info(f"🔄 Job {job_data.get('name', job_id)} 已过期，下次执行: {new_next}")
+                    else:
+                        logger.info(f"⏸️ Job {job_data.get('name', job_id)} 无下次执行时间，跳过")
+                        return
+            except (ValueError, TypeError):
+                pass  # 时间格式异常，继续加载
+        
         # 添加到APScheduler
         self.scheduler.add_job(
             func=self._execute_job_wrapper,
@@ -255,7 +278,7 @@ class APSchedulerCronScheduler:
             name=job_data.get("name", job_id),
             max_instances=1,
             coalesce=True,
-            misfire_grace_time=60,
+            misfire_grace_time=0,  # 不补执行过期任务
             replace_existing=True
         )
         
