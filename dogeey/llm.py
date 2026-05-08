@@ -2,6 +2,7 @@
 LLM调用封装 - 支持OpenAI兼容API
 带自动重试、优雅错误处理、抑制SDK内部日志
 """
+import os
 import time
 import logging
 import re
@@ -17,6 +18,11 @@ class LLMClient:
     """LLM客户端封装（带自动重试）"""
     
     def __init__(self, api_key: str, base_url: str, model: str, timeout: int = 120):
+        # 清除代理环境变量，避免 SDK 走代理导致认证失败
+        for env_key in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
+            if env_key in os.environ:
+                del os.environ[env_key]
+        
         self.client = OpenAI(
             api_key=api_key,
             base_url=base_url,
