@@ -154,11 +154,9 @@ class LLMClient:
 
 
 def create_llm_client_from_config(config_dict: Dict, provider_override: str = None) -> LLMClient:
-    """从配置字典创建LLM客户端
+    """从配置字典创建LLM客户端，带自动fallback
     
-    Args:
-        config_dict: 配置字典
-        provider_override: 可选，直接指定提供商名称（覆盖配置中的current_provider）
+    如果主提供商不可用，自动切换到备用提供商。
     """
     provider = provider_override or config_dict.get("llm", {}).get("current_provider")
     providers = config_dict.get("llm", {}).get("providers", [])
@@ -166,6 +164,7 @@ def create_llm_client_from_config(config_dict: Dict, provider_override: str = No
     if not provider:
         raise ValueError("未配置模型提供商，请先运行: dogeey init")
     
+    # 获取主提供商配置
     provider_config = None
     for p in providers:
         if p["name"] == provider:
@@ -175,25 +174,64 @@ def create_llm_client_from_config(config_dict: Dict, provider_override: str = No
     if not provider_config:
         raise ValueError(f"找不到提供商配置: {provider}")
     
-    api_key = provider_config.get("api_key", "")
-    if api_key.startswith("${") and api_key.endswith("}"):
-        env_var = api_key[2:-1]
-        api_key = __import__("os").environ.get(env_var, "")
+    # 构建候选列表：主提供商 + 备用提供商
+    fallback_names = config_dict.get("llm", {}).get("fallback_providers", [])
+    if isinstance(fallback_names, list) and fallback_names:
+        candidate_names = [provider] + [fn for fn in fallback_names if fn != provider]
+    else:
+        # 默认 fallback：openrouter → astron
+        if provider == "openrouter":
+            candidate_names = ["openrouter", "astron"]
+        elif provider == "astron":
+            candidate_names = ["astron", "openrouter"]
+        else:
+            candidate_names = [provider]
     
-    if not api_key:
-        raise ValueError("API Key未配置，请设置环境变量或重新配置")
+    # 尝试每个提供商
+    last_error = None
+    for candidate_name in candidate_names:
+        candidate_config = None
+        for p in providers:
+            if p["name"] == candidate_name:
+                candidate_config = p
+                break
+        
+        if not candidate_config:
+            continue
+        
+        api_key = candidate_config.get("api_key", "")
+        if api_key.startswith("${") and api_key.endswith("}"):
+            env_var = api_key[2:-1]
+            api_key = os.environ.get(env_var, "")
+        
+        if not api_key:
+            continue
+        
+        base_url = candidate_config.get("base_url", "https://api.openai.com/v1")
+        model = candidate_config.get("default_model", "gpt-4o")
+        timeout = config_dict.get("llm", {}).get("timeout", 120)
+        
+        try:
+            # 测试连接
+            test_client = LLMClient(api_key=api_key, base_url=base_url, model=model, timeout=15)
+            test_client.client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": "你好"}],
+                max_tokens=10
+            )
+            # 连接成功
+            if candidate_name != provider:
+                logging.getLogger(__name__).warning(
+                    f"⚠️ 主提供商 {provider} 不可用，切换到备用: {candidate_name} ({model})"
+                )
+            logging.getLogger(__name__).info(
+                f"🔧 创建LLM客户端: provider={candidate_name}, model={model}, base_url={base_url}"
+            )
+            return test_client
+            
+        except Exception as e:
+            last_error = e
+            logging.getLogger(__name__).warning(f"⚠️ 提供商 {candidate_name} 连接失败: {e}")
+            continue
     
-    base_url = provider_config.get("base_url", "https://api.openai.com/v1")
-    model = provider_config.get("default_model", "gpt-4o")
-    timeout = config_dict.get("llm", {}).get("timeout", 120)
-    
-    logging.getLogger(__name__).info(
-        f"🔧 创建LLM客户端: provider={provider}, model={model}, base_url={base_url}"
-    )
-    
-    return LLMClient(
-        api_key=api_key,
-        base_url=base_url,
-        model=model,
-        timeout=timeout
-    )
+    raise last_error or ValueError("所有提供商均不可用")
