@@ -25,6 +25,9 @@ logging.getLogger("Lark").setLevel(logging.WARNING)
 logging.getLogger("lark_oapi").setLevel(logging.WARNING)
 # 抑制 APScheduler 的 INFO 级别日志
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
+# 抑制 dogeey 内部模块的 INFO 日志（LLM创建、Cron执行等）
+logging.getLogger("dogeey.llm").setLevel(logging.WARNING)
+logging.getLogger("dogeey.cron").setLevel(logging.WARNING)
 
 
 # ============ 交互式对话会话 ============
