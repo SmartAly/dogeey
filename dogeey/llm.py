@@ -62,14 +62,32 @@ class LLMClient:
                     return self._handle_stream(response)
                 else:
                     message = response.choices[0].message
-                    # 优先检查reasoning_content（astron等推理模型特有字段）
+                    
+                    # 多模型兼容：不同厂商的推理内容字段名不同
+                    content = None
+                    
+                    # 1. 优先检查 reasoning_content（astron等）
                     if hasattr(message, 'reasoning_content') and message.reasoning_content:
                         content = message.reasoning_content
-                        self._logger.info(f"LLM响应成功(推理模型): content_length={len(content)}")
-                    else:
+                    # 2. 检查 reasoning（OpenRouter/tencent hy3等）
+                    elif hasattr(message, 'reasoning') and message.reasoning:
+                        content = message.reasoning
+                    # 3. 标准 content 字段
+                    elif message.content:
                         content = message.content
-                        self._logger.info(f"LLM响应成功: content_length={len(content) if content else 0}")
-                    return content
+                    # 4. 检查 model_extra 中的 reasoning（OpenAI SDK 新版本）
+                    else:
+                        extra = getattr(message, 'model_extra', None)
+                        if extra and extra.get('reasoning'):
+                            content = extra['reasoning']
+                    
+                    if content:
+                        self._logger.info(f"LLM响应成功: content_length={len(content)}")
+                        return content
+                    else:
+                        # 内容为空，可能是模型响应异常
+                        self._logger.warning(f"LLM响应内容为空，原始响应: {str(response)[:100]}")
+                        return ""
 
             except Exception as e:
                 err_str = str(e)
@@ -159,7 +177,7 @@ class LLMClient:
 
 
 def create_llm_client_from_config(config_dict: Dict, provider_override: str = None) -> LLMClient:
-    """从配置字典创建LLM客户端，带自动fallback
+    """从配置字典创建LLM客户端
     
     如果主提供商不可用，自动切换到备用提供商。
     """
@@ -169,22 +187,12 @@ def create_llm_client_from_config(config_dict: Dict, provider_override: str = No
     if not provider:
         raise ValueError("未配置模型提供商，请先运行: dogeey init")
     
-    # 获取主提供商配置
-    provider_config = None
-    for p in providers:
-        if p["name"] == provider:
-            provider_config = p
-            break
-    
-    if not provider_config:
-        raise ValueError(f"找不到提供商配置: {provider}")
-    
     # 构建候选列表：主提供商 + 备用提供商
     fallback_names = config_dict.get("llm", {}).get("fallback_providers", [])
     if isinstance(fallback_names, list) and fallback_names:
         candidate_names = [provider] + [fn for fn in fallback_names if fn != provider]
     else:
-        # 默认 fallback：openrouter → astron
+        # 默认 fallback
         if provider == "openrouter":
             candidate_names = ["openrouter", "astron"]
         elif provider == "astron":
@@ -217,14 +225,10 @@ def create_llm_client_from_config(config_dict: Dict, provider_override: str = No
         timeout = config_dict.get("llm", {}).get("timeout", 120)
         
         try:
-            # 测试连接
+            # 使用 LLMClient.chat() 方法测试连接（会自动处理 reasoning 字段）
             test_client = LLMClient(api_key=api_key, base_url=base_url, model=model, timeout=15)
-            test_client.client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": "你好"}],
-                max_tokens=10
-            )
-            # 连接成功
+            result = test_client.chat([{"role": "user", "content": "你好"}], max_tokens=10)
+            # 只要没有异常就算成功（即使内容为空）
             if candidate_name != provider:
                 logging.getLogger(__name__).warning(
                     f"⚠️ 主提供商 {provider} 不可用，切换到备用: {candidate_name} ({model})"
