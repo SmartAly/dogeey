@@ -6,6 +6,7 @@ import os
 import readline  # 启用更好的行编辑支持（退格、方向键、历史记录）
 import click
 import json
+import logging
 from pathlib import Path
 from datetime import datetime
 from .config import config, DEFAULT_CONFIG_DIR
@@ -18,6 +19,12 @@ from .fancy_output import (
 )
 from .cron.manager import get_cron_manager
 from .cron.scheduler import get_scheduler
+
+# 抑制 Lark SDK 的 INFO 级别日志（避免飞书断连日志泄露到 CLI 界面）
+logging.getLogger("Lark").setLevel(logging.WARNING)
+logging.getLogger("lark_oapi").setLevel(logging.WARNING)
+# 抑制 APScheduler 的 INFO 级别日志
+logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
 
 # ============ 交互式对话会话 ============

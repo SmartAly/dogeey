@@ -174,14 +174,24 @@ class APSchedulerCronScheduler:
             # 如果设置了自定义执行器，使用它
             if self._custom_executor:
                 result = self._custom_executor(job_id)
+                # 自定义执行器返回字符串
+                if isinstance(result, str):
+                    logger.info(f"✅ Job {job_id} executed (output: {len(result)} chars)")
+                    return
+                elif isinstance(result, dict):
+                    if result.get("success"):
+                        logger.info(f"✅ Job {job_id} completed successfully "
+                                  f"(duration: {result.get('duration', 0):.2f}s)")
+                    else:
+                        logger.warning(f"⚠️ Job {job_id} failed: {result.get('error', 'Unknown error')}")
+                    return
             else:
                 result = self.executor.execute_job_by_id(job_id)
-            
-            if result.get("success"):
-                logger.info(f"✅ Job {job_id} completed successfully "
-                          f"(duration: {result.get('duration', 0):.2f}s)")
-            else:
-                logger.warning(f"⚠️ Job {job_id} failed: {result.get('error', 'Unknown error')}")
+                if result.get("success"):
+                    logger.info(f"✅ Job {job_id} completed successfully "
+                              f"(duration: {result.get('duration', 0):.2f}s)")
+                else:
+                    logger.warning(f"⚠️ Job {job_id} failed: {result.get('error', 'Unknown error')}")
         
         except Exception as e:
             logger.error(f"❌ Error executing job {job_id}: {e}")
