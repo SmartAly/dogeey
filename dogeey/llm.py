@@ -27,7 +27,12 @@ class LLMClient:
             api_key=api_key,
             base_url=base_url,
             timeout=timeout,
-            max_retries=0  # 自己控制重试，不用SDK默认的
+            max_retries=0,  # 自己控制重试，不用SDK默认的
+            default_headers={
+                # OpenRouter 要求的 headers
+                "HTTP-Referer": "https://github.com/SmartAly/dogeey",
+                "X-Title": "dogeey",
+            }
         )
         self.model = model
         self.timeout = timeout
