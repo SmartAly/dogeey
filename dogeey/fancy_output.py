@@ -188,6 +188,13 @@ show_start_up_animation = show_startup_animation
 
 def show_model_status(model: str, provider: str, current_tokens: int, max_tokens: int):
     """显示模型状态栏 (Hermes风格，固定在输入框上方)"""
+    # 获取终端宽度
+    try:
+        import shutil
+        term_width = shutil.get_terminal_size().columns
+    except:
+        term_width = 120
+    
     # 格式化token数 (K/M)
     def fmt_tokens(n):
         if n >= 1000000:
@@ -199,6 +206,11 @@ def show_model_status(model: str, provider: str, current_tokens: int, max_tokens
     # 计算百分比
     pct = min(int((current_tokens / max_tokens) * 100), 100) if max_tokens > 0 else 0
     
+    # 截断模型名（防止折行）
+    max_model_len = 15
+    if len(model) > max_model_len:
+        model = model[:max_model_len-3] + "..."
+    
     # 生成进度条 (20个字符宽度)
     bar_width = 20
     filled = int((pct / 100) * bar_width)
@@ -207,8 +219,12 @@ def show_model_status(model: str, provider: str, current_tokens: int, max_tokens
     # 组装状态行
     status_line = f"{model} ({provider}) │ {fmt_tokens(current_tokens)}/{fmt_tokens(max_tokens)} │ [{bar}] {pct}%"
     
-    # 斑马线 (动态宽度)
-    width = len(status_line) + 4
+    # 限制总宽度不超过终端
+    if len(status_line) > term_width - 4:
+        status_line = status_line[:term_width-7] + "..."
+    
+    # 斑马线 (动态宽度，最大80)
+    width = min(len(status_line) + 4, max(term_width, 80))
     zebra = "━" * width
     
     # 输出 (使用console避免和readline冲突)
