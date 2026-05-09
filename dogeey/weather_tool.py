@@ -21,9 +21,7 @@ def tool_query_weather(city: str, forecast_days: int = 0, language: str = "zh") 
             "lang": language,
         }
         
-        if forecast_days > 0:
-            params["num_of_days"] = min(forecast_days, 3)  # 最多3天
-        
+        # wttr.in JSON API (?format=j1) 默认包含3天预报，不支持num_of_days参数
         resp = requests.get(url, params=params, timeout=10)
         resp.raise_for_status()
         data = resp.json()
@@ -44,9 +42,10 @@ def tool_query_weather(city: str, forecast_days: int = 0, language: str = "zh") 
         result += f"💧 湿度: {humidity}%\n"
         result += f"💨 风速: {wind_speed}km/h（{wind_dir}）\n"
         
-        # 预报
-        if forecast_days > 0:
-            for day_data in data.get("weather", [])[:forecast_days]:
+        # 预报（API默认返回3天）
+        weather_days = data.get("weather", [])
+        if forecast_days > 0 and weather_days:
+            for day_data in weather_days[:forecast_days]:
                 date = day_data.get("date", "")
                 avg_temp = day_data.get("avgtempC", "未知")
                 max_temp = day_data.get("maxtempC", "未知")

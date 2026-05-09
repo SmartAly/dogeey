@@ -650,7 +650,7 @@ class DogeeySession:
                                         # 格式: {"user": ..., "assistant": ...}
                                         if 'user' in mem:
                                             messages.append({'role': 'user', 'content': mem['user']})
-                                        if 'assistant' in mem:  # 修正拼写
+                                        if 'assistant' in mem:
                                             messages.append({'role': 'assistant', 'content': mem['assistant']})
                             
                             # 如果有上下文管理器，也加入其消息

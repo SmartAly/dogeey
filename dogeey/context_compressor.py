@@ -84,10 +84,15 @@ class ContextCompressor:
             'llama-2': 4096,
             'mixtral': 32768,
             'gemini-pro': 32768,
-            'astron-code-latest': 256000,  # 修正：原来是8192
-            'kimi-k2.5': 256000,  # Kimi 2.5
-            'moonshotai/kimi-k2.5': 256000,  # 完整路径
-            'kimi': 256000,  # 简化名
+            'astron-code-latest': 256000,
+            'kimi-k2.5': 256000,
+            'moonshotai/kimi-k2.5': 256000,
+            'kimi': 256000,
+            'minimax/minimax-m2.5': 196608,
+            'minimax': 196608,
+            'google/gemma-4-26b-a4b-it': 262144,
+            'google/gemma-4-31b-it': 262144,
+            'nvidia/nemotron-3-super-120b-a12b': 262144,
         }
         
         # 先查已知模型（精确匹配）
